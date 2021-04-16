@@ -3,7 +3,7 @@ const { expect, use } = require('chai');
 const { time, expectRevert } = require('@openzeppelin/test-helpers');
 
 describe('MOMA Token', () => {
-  let admin, alice, bob, charles, team, developmentFunds, ecosystemFunds;
+  let admin, alice, bob, charles, multisig, team, developmentFunds, ecosystemFunds;
   let moma;
   let blacklistEffectiveDuration = 30; // 30 days
   let blacklistLockDuration = 50; // 50 days
@@ -14,13 +14,14 @@ describe('MOMA Token', () => {
       alice,
       bob,
       charles,
+      multisig,
       team,
       developmentFunds,
       ecosystemFunds,
     ] = await ethers.getSigners();
 
     const MochiToken = await ethers.getContractFactory('contracts/MOMA.sol:MOMA');
-    moma = await MochiToken.connect(admin).deploy();
+    moma = await MochiToken.connect(admin).deploy(multisig.address);
     await moma.deployed();
   });
 
@@ -52,7 +53,7 @@ describe('MOMA Token', () => {
     });
 
     it('User not in blacklist can send MOMA', async () => {
-      await moma.connect(admin).mint(alice.address, '123456');
+      await moma.connect(multisig).mint(alice.address, '123456');
       expect(await moma.balanceOf(alice.address)).to.equal('123456');
       await moma.connect(alice).transfer(bob.address, '456');
       expect(await moma.balanceOf(alice.address)).to.equal('123000');
@@ -66,7 +67,7 @@ describe('MOMA Token', () => {
     });
 
     it('User in blacklist cannot send locked MOMA', async () => {
-      await moma.connect(admin).mint(alice.address, '123456');
+      await moma.connect(multisig).mint(alice.address, '123456');
       await moma.connect(admin).addToBlacklist(alice.address);
       const remainLockedBalance = await moma.remainLockedBalance(alice.address);
       expect(remainLockedBalance).to.equal('123456');
@@ -85,7 +86,7 @@ describe('MOMA Token', () => {
     });
 
     it('No remain locked balance after 50 days', async () => {
-      await moma.connect(admin).mint(alice.address, '1000');
+      await moma.connect(multisig).mint(alice.address, '1000');
       await moma.connect(admin).addToBlacklist(alice.address);
 
       await time.increase(time.duration.days(50));
@@ -98,7 +99,7 @@ describe('MOMA Token', () => {
     });
 
     it('User in blacklist can claim token daily in 50 days', async () => {
-      await moma.connect(admin).mint(alice.address, '1000');
+      await moma.connect(multisig).mint(alice.address, '1000');
       await moma.connect(admin).addToBlacklist(alice.address);
 
       await time.increase(time.duration.days(1));
@@ -125,7 +126,7 @@ describe('MOMA Token', () => {
     });
 
     it('Remove from blacklist', async () => {
-      await moma.connect(admin).mint(alice.address, '1000');
+      await moma.connect(multisig).mint(alice.address, '1000');
       await moma.connect(admin).addToBlacklist(alice.address);
 
       await time.increase(time.duration.days(5));
@@ -150,7 +151,7 @@ describe('MOMA Token', () => {
        * After 360 days, unlock in 12 rounds, each round 30 days
        */
       beforeEach(async () => {
-        await moma.connect(admin).addVestingToken(team.address, '18000000', 360, 12, 30);
+        await moma.connect(multisig).addVestingToken(team.address, '18000000', 360, 12, 30);
       });
 
       it('Claimable amount at first is 0', async () => {
@@ -218,7 +219,7 @@ describe('MOMA Token', () => {
         await time.increase(time.duration.days(50));
         claimableAmount = await moma.getVestingClaimableAmount(team.address);
         expect(claimableAmount).to.equal('3000000');
-        await moma.connect(admin).revokeVestingToken(team.address);
+        await moma.connect(multisig).revokeVestingToken(team.address);
         expect(await moma.balanceOf(team.address)).to.equal('4500000');
         claimableAmount = await moma.getVestingClaimableAmount(team.address);
         expect(claimableAmount).to.equal('0');
@@ -246,7 +247,9 @@ describe('MOMA Token', () => {
        * Unlock in 59 rounds, each round 30 days
        */
       beforeEach(async () => {
-        await moma.connect(admin).addVestingToken(developmentFunds.address, '15733333', 0, 59, 30);
+        await moma
+          .connect(multisig)
+          .addVestingToken(developmentFunds.address, '15733333', 0, 59, 30);
       });
 
       it('Claimable amount at first is 0', async () => {
@@ -324,7 +327,7 @@ describe('MOMA Token', () => {
         await time.increase(time.duration.days(30));
         claimableAmount = await moma.getVestingClaimableAmount(developmentFunds.address);
         expect(claimableAmount).to.gte('266666');
-        await moma.connect(admin).revokeVestingToken(developmentFunds.address);
+        await moma.connect(multisig).revokeVestingToken(developmentFunds.address);
         expect(await moma.balanceOf(developmentFunds.address)).to.equal('533333');
         claimableAmount = await moma.getVestingClaimableAmount(developmentFunds.address);
         expect(claimableAmount).to.equal('0');
@@ -358,7 +361,7 @@ describe('MOMA Token', () => {
        * Unlock in 59 rounds, each round 30 days
        */
       beforeEach(async () => {
-        await moma.connect(admin).addVestingToken(ecosystemFunds.address, '22616666', 0, 59, 30);
+        await moma.connect(multisig).addVestingToken(ecosystemFunds.address, '22616666', 0, 59, 30);
       });
 
       it('Claimable amount at first is 0', async () => {
@@ -436,7 +439,7 @@ describe('MOMA Token', () => {
         await time.increase(time.duration.days(30));
         claimableAmount = await moma.getVestingClaimableAmount(ecosystemFunds.address);
         expect(claimableAmount).to.equal('383333');
-        await moma.connect(admin).revokeVestingToken(ecosystemFunds.address);
+        await moma.connect(multisig).revokeVestingToken(ecosystemFunds.address);
         expect(await moma.balanceOf(ecosystemFunds.address)).to.gte('766666');
         claimableAmount = await moma.getVestingClaimableAmount(ecosystemFunds.address);
         expect(claimableAmount).to.equal('0');
@@ -470,7 +473,9 @@ describe('MOMA Token', () => {
          * Unlock in 59 rounds, each round 30 days
          */
         beforeEach(async () => {
-          await moma.connect(admin).addVestingToken(ecosystemFunds.address, '21780833', 0, 59, 30);
+          await moma
+            .connect(multisig)
+            .addVestingToken(ecosystemFunds.address, '21780833', 0, 59, 30);
         });
 
         it('Claimable amount at first is 0', async () => {
@@ -547,7 +552,7 @@ describe('MOMA Token', () => {
           await time.increase(time.duration.days(30));
           claimableAmount = await moma.getVestingClaimableAmount(ecosystemFunds.address);
           expect(claimableAmount).to.gte('369166');
-          await moma.connect(admin).revokeVestingToken(ecosystemFunds.address);
+          await moma.connect(multisig).revokeVestingToken(ecosystemFunds.address);
           expect(await moma.balanceOf(ecosystemFunds.address)).to.equal('738333');
           claimableAmount = await moma.getVestingClaimableAmount(ecosystemFunds.address);
           expect(claimableAmount).to.equal('0');
@@ -581,7 +586,7 @@ describe('MOMA Token', () => {
          * After 180 days, unlock in 6 rounds, each round 30 days
          */
         beforeEach(async () => {
-          await moma.connect(admin).addVestingToken(bob.address, '850000', 180, 6, 30);
+          await moma.connect(multisig).addVestingToken(bob.address, '850000', 180, 6, 30);
         });
 
         it('Claimable amount at first is 0', async () => {
@@ -649,7 +654,7 @@ describe('MOMA Token', () => {
           await time.increase(time.duration.days(30));
           claimableAmount = await moma.getVestingClaimableAmount(bob.address);
           expect(claimableAmount).to.gte('141666');
-          await moma.connect(admin).revokeVestingToken(bob.address);
+          await moma.connect(multisig).revokeVestingToken(bob.address);
           expect(await moma.balanceOf(bob.address)).to.equal('283333');
           claimableAmount = await moma.getVestingClaimableAmount(bob.address);
           expect(claimableAmount).to.equal('0');

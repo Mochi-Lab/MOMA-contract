@@ -1,12 +1,14 @@
 // SPDX-License-Identifier:GPL-3.0
-pragma solidity 0.8.3;
+pragma solidity 0.6.12;
+pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/presets/ERC20PresetMinterPauser.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/presets/ERC20PresetMinterPauser.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @author MochiLab
 contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
+    using SafeMath for uint256;
     struct BlacklistInfo {
         bool locked;
         uint256 lockedFrom;
@@ -28,6 +30,7 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
 
     mapping(address => VestingInfo) private _vestingList;
 
+    bytes32 public constant LOCKER_ROLE = keccak256("LOCKER_ROLE");
     uint256 public constant INITIAL_SUPPLY = 5000000 * DECIMAL_MULTIPLIER;
     uint256 public constant MAX_SUPPLY = 100000000 * DECIMAL_MULTIPLIER;
     uint256 public constant DECIMAL_MULTIPLIER = 10**18;
@@ -44,13 +47,25 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         _;
     }
 
-    constructor() ERC20PresetMinterPauser("MOchi MArket", "MOMA") {
-        _blacklistEffectiveEndtime = block.timestamp + BLACKLIST_EFFECTIVE_DURATION;
+    modifier onlyLocker() {
+        require(hasRole(LOCKER_ROLE, _msgSender()), "MOMA: LOCKER role required");
+        _;
+    }
+
+    constructor(address multiSigAccount) public ERC20PresetMinterPauser("MOchi MArket", "MOMA") {
+        _blacklistEffectiveEndtime = block.timestamp.add(BLACKLIST_EFFECTIVE_DURATION);
         _mint(_msgSender(), INITIAL_SUPPLY);
+        _setupRole(DEFAULT_ADMIN_ROLE, multiSigAccount);
+        _setupRole(MINTER_ROLE, multiSigAccount);
+        _setupRole(PAUSER_ROLE, multiSigAccount);
+        _setupRole(LOCKER_ROLE, _msgSender());
+        renounceRole(DEFAULT_ADMIN_ROLE, _msgSender());
+        renounceRole(MINTER_ROLE, _msgSender());
+        renounceRole(PAUSER_ROLE, _msgSender());
     }
 
     function mint(address to, uint256 amount) public virtual override onlyMinter {
-        require(totalSupply() + amount <= MAX_SUPPLY, "MOMA: Max supply exceeded");
+        require(totalSupply().add(amount) <= MAX_SUPPLY, "MOMA: Max supply exceeded");
         _mint(to, amount);
     }
 
@@ -62,21 +77,21 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         return _blacklist[user];
     }
 
-    function addToBlacklist(address user) external onlyAdmin {
+    function addToBlacklist(address user) external onlyLocker {
         require(block.timestamp < _blacklistEffectiveEndtime, "MOMA: Force lock time ended");
         _blacklist[user] = BlacklistInfo(true, block.timestamp, balanceOf(user));
     }
 
-    function removeFromBlacklist(address user) external onlyAdmin {
+    function removeFromBlacklist(address user) external onlyLocker {
         _blacklist[user].locked = false;
     }
 
     function _getUnlockedBalance(address user) internal view returns (uint256 unlockedBalance) {
         BlacklistInfo memory info = _blacklist[user];
-        uint256 daysPassed = (block.timestamp - info.lockedFrom) / (1 days);
+        uint256 daysPassed = block.timestamp.sub(info.lockedFrom).div(1 days);
 
         if (info.locked && daysPassed < BLACKLIST_LOCK_DAYS) {
-            unlockedBalance = (daysPassed * info.initLockedBalance) / BLACKLIST_LOCK_DAYS;
+            unlockedBalance = daysPassed.mul(info.initLockedBalance).div(BLACKLIST_LOCK_DAYS);
         } else {
             unlockedBalance = info.initLockedBalance;
         }
@@ -84,7 +99,7 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
     }
 
     function remainLockedBalance(address user) public view returns (uint256) {
-        return _blacklist[user].initLockedBalance - _getUnlockedBalance(user);
+        return _blacklist[user].initLockedBalance.sub(_getUnlockedBalance(user));
     }
 
     function addVestingToken(
@@ -112,7 +127,7 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
     function revokeVestingToken(address user) external onlyAdmin {
         require(_vestingList[user].isActive, "MOMA: Invalid beneficiary");
         uint256 claimableAmount = _getVestingClaimableAmount(user);
-        require(totalSupply() + claimableAmount <= MAX_SUPPLY, "MOMA: Max supply exceeded");
+        require(totalSupply().add(claimableAmount) <= MAX_SUPPLY, "MOMA: Max supply exceeded");
         _vestingList[user].isActive = false;
         _mint(user, claimableAmount);
     }
@@ -128,19 +143,20 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
     {
         if (!_vestingList[user].isActive) return 0;
         VestingInfo memory info = _vestingList[user];
-        uint256 releaseTime = info.startTime + info.fullLockedDays * (1 days);
+        uint256 releaseTime = info.startTime.add(info.fullLockedDays.mul(1 days));
         if (block.timestamp < releaseTime) return 0;
-        uint256 roundsPassed = (block.timestamp - releaseTime) / (1 days) / info.daysPerRound;
+        uint256 roundsPassed =
+            (block.timestamp.sub(releaseTime)).div(1 days).div(info.daysPerRound);
 
         uint256 releasedAmount;
         if (roundsPassed >= info.releaseTotalRounds) {
             releasedAmount = info.amount;
         } else {
-            releasedAmount = (info.amount * roundsPassed) / info.releaseTotalRounds;
+            releasedAmount = info.amount.mul(roundsPassed).div(info.releaseTotalRounds);
         }
         claimableAmount = 0;
         if (releasedAmount > info.claimedAmount) {
-            claimableAmount = releasedAmount - info.claimedAmount;
+            claimableAmount = releasedAmount.sub(info.claimedAmount);
         }
     }
 
@@ -148,14 +164,14 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         return _getVestingClaimableAmount(user);
     }
 
-    function claimVestingToken() external nonReentrant returns (uint256 claimableAmount) {
+    function claimVestingToken() external nonReentrant returns (uint256) {
         require(_vestingList[_msgSender()].isActive, "MOMA: Not in vesting list");
-        claimableAmount = _getVestingClaimableAmount(_msgSender());
+        uint256 claimableAmount = _getVestingClaimableAmount(_msgSender());
         require(claimableAmount > 0, "MOMA: Nothing to claim");
-        require(totalSupply() + claimableAmount <= MAX_SUPPLY, "MOMA: Max supply exceeded");
-        _vestingList[_msgSender()].claimedAmount =
-            _vestingList[_msgSender()].claimedAmount +
-            claimableAmount;
+        require(totalSupply().add(claimableAmount) <= MAX_SUPPLY, "MOMA: Max supply exceeded");
+        _vestingList[_msgSender()].claimedAmount = _vestingList[_msgSender()].claimedAmount.add(
+            claimableAmount
+        );
         _mint(_msgSender(), claimableAmount);
     }
 
@@ -168,7 +184,7 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         if (_blacklist[from].locked) {
             uint256 lockedBalance = remainLockedBalance(from);
             require(
-                balanceOf(from) - amount >= lockedBalance,
+                balanceOf(from).sub(amount) >= lockedBalance,
                 "MOMA BLACKLIST: Cannot transfer locked balance"
             );
         }
