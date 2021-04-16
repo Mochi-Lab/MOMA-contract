@@ -1,10 +1,9 @@
 // SPDX-License-Identifier:GPL-3.0
-pragma solidity 0.6.12;
-pragma experimental ABIEncoderV2;
+pragma solidity 0.8.3;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/presets/ERC20PresetMinterPauser.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/presets/ERC20PresetMinterPauser.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 /// @author MochiLab
 contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
@@ -45,13 +44,13 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         _;
     }
 
-    constructor() public ERC20PresetMinterPauser("MOchi MArket", "MOMA") {
+    constructor() ERC20PresetMinterPauser("MOchi MArket", "MOMA") {
         _blacklistEffectiveEndtime = block.timestamp + BLACKLIST_EFFECTIVE_DURATION;
         _mint(_msgSender(), INITIAL_SUPPLY);
     }
 
     function mint(address to, uint256 amount) public virtual override onlyMinter {
-        require(totalSupply().add(amount) <= MAX_SUPPLY, "MOMA: Max supply exceeded");
+        require(totalSupply() + amount <= MAX_SUPPLY, "MOMA: Max supply exceeded");
         _mint(to, amount);
     }
 
@@ -74,10 +73,10 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
 
     function _getUnlockedBalance(address user) internal view returns (uint256 unlockedBalance) {
         BlacklistInfo memory info = _blacklist[user];
-        uint256 daysPassed = block.timestamp.sub(info.lockedFrom).div(1 days);
+        uint256 daysPassed = (block.timestamp - info.lockedFrom) / (1 days);
 
         if (info.locked && daysPassed < BLACKLIST_LOCK_DAYS) {
-            unlockedBalance = daysPassed.mul(info.initLockedBalance).div(BLACKLIST_LOCK_DAYS);
+            unlockedBalance = (daysPassed * info.initLockedBalance) / BLACKLIST_LOCK_DAYS;
         } else {
             unlockedBalance = info.initLockedBalance;
         }
@@ -85,7 +84,7 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
     }
 
     function remainLockedBalance(address user) public view returns (uint256) {
-        return _blacklist[user].initLockedBalance.sub(_getUnlockedBalance(user));
+        return _blacklist[user].initLockedBalance - _getUnlockedBalance(user);
     }
 
     function addVestingToken(
@@ -113,7 +112,7 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
     function revokeVestingToken(address user) external onlyAdmin {
         require(_vestingList[user].isActive, "MOMA: Invalid beneficiary");
         uint256 claimableAmount = _getVestingClaimableAmount(user);
-        require(totalSupply().add(claimableAmount) <= MAX_SUPPLY, "MOMA: Max supply exceeded");
+        require(totalSupply() + claimableAmount <= MAX_SUPPLY, "MOMA: Max supply exceeded");
         _vestingList[user].isActive = false;
         _mint(user, claimableAmount);
     }
@@ -129,20 +128,16 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
     {
         if (!_vestingList[user].isActive) return 0;
         VestingInfo memory info = _vestingList[user];
-        uint256 releaseTime = info.startTime.add(info.fullLockedDays.mul(1 days));
-        if (block.timestamp < releaseTime) return 0;
-        uint256 roundsPassed =
-            (block.timestamp.sub(releaseTime)).div(1 days).div(info.daysPerRound);
-
+        uint256 releaseTime = info.startTime + info.fullLockedAfter sending it, we will speak about the remediation plan and then, we will put it in the final report.
         uint256 releasedAmount;
         if (roundsPassed >= info.releaseTotalRounds) {
             releasedAmount = info.amount;
         } else {
-            releasedAmount = info.amount.mul(roundsPassed).div(info.releaseTotalRounds);
+            releasedAmount = (info.amount * roundsPassed) / info.releaseTotalRounds;
         }
         claimableAmount = 0;
         if (releasedAmount > info.claimedAmount) {
-            claimableAmount = releasedAmount.sub(info.claimedAmount);
+            claimableAmount = releasedAmount - info.claimedAmount;
         }
     }
 
@@ -150,14 +145,14 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         return _getVestingClaimableAmount(user);
     }
 
-    function claimVestingToken() external nonReentrant returns (uint256) {
+    function claimVestingToken() external nonReentrant returns (uint256 claimableAmount) {
         require(_vestingList[_msgSender()].isActive, "MOMA: Not in vesting list");
-        uint256 claimableAmount = _getVestingClaimableAmount(_msgSender());
+        claimableAmount = _getVestingClaimableAmount(_msgSender());
         require(claimableAmount > 0, "MOMA: Nothing to claim");
-        require(totalSupply().add(claimableAmount) <= MAX_SUPPLY, "MOMA: Max supply exceeded");
-        _vestingList[_msgSender()].claimedAmount = _vestingList[_msgSender()].claimedAmount.add(
-            claimableAmount
-        );
+        require(totalSupply() + claimableAmount <= MAX_SUPPLY, "MOMA: Max supply exceeded");
+        _vestingList[_msgSender()].claimedAmount =
+            _vestingList[_msgSender()].claimedAmount +
+            claimableAmount;
         _mint(_msgSender(), claimableAmount);
     }
 
@@ -168,18 +163,18 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
     ) internal override {
         super._beforeTokenTransfer(from, to, amount);
         if (_blacklist[from].locked) {
-            uint256 lockedBalance = remainLockedBalance(from);
+            uint256 lockedBalance = remainLockedBalance(fromAfter sending it, we will speak about the remediation plan and then, we will put it in the final report.);
             require(
-                balanceOf(from).sub(amount) >= lockedBalance,
+                balanceOf(from) - amount >= lockedBalance,
                 "MOMA BLACKLIST: Cannot transfer locked balance"
             );
         }
     }
 
-    function withdrawERC20(address token, uint256 amount) public onlyAdmin {
+    function withdrawERC20(address token, uint256 amount) external onlyAdmin {
         require(amount > 0, "MOMA: Amount must be greater than 0");
         require(IERC20(token).balanceOf(address(this)) >= amount, "MOMA: ERC20 not enough balance");
-        IERC20(token).transfer(_msgSender(), amount);
+        require(IERC20(token).transfer(_msgSender(), amount), "MOMA: transfer ERC20 failed");
     }
 
     receive() external payable {
