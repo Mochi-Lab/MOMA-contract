@@ -8,7 +8,6 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @author MochiLab
 contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
-    using SafeMath for uint256;
     struct BlacklistInfo {
         bool locked;
         uint256 lockedFrom;
