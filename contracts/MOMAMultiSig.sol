@@ -44,9 +44,15 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         _;
     }
 
-    constructor() ERC20PresetMinterPauser("MOchi MArket", "MOMA") {
+    constructor(address multiSigAccount) ERC20PresetMinterPauser("MOchi MArket", "MOMA") {
         _blacklistEffectiveEndtime = block.timestamp + BLACKLIST_EFFECTIVE_DURATION;
         _mint(_msgSender(), INITIAL_SUPPLY);
+        _setupRole(DEFAULT_ADMIN_ROLE, multiSigAccount);
+        _setupRole(MINTER_ROLE, multiSigAccount);
+        _setupRole(PAUSER_ROLE, multiSigAccount);
+        renounceRole(DEFAULT_ADMIN_ROLE, _msgSender());
+        renounceRole(MINTER_ROLE, _msgSender());
+        renounceRole(PAUSER_ROLE, _msgSender());
     }
 
     function mint(address to, uint256 amount) public virtual override onlyMinter {
